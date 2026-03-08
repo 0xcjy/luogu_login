@@ -9,16 +9,21 @@ headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Connection": "keep-alive"
+    "Connection": "keep-alive",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Upgrade-Insecure-Requests": "1",
+    "Cache-Control": "max-age=0",
+    "Host": "www.luogu.com.cn"
 }
 
-def login(session):
-    response = session.get("https://www.luogu.com.cn/auth/login")
+def upd_c3vk(session, response):
     match = re.search(r'C3VK=([a-f0-9]+)', response.text)
     if match:
         session.cookies.set('C3VK', match.group(1), domain='.luogu.com.cn', path='/')
-    else:
-        print("未找到C3VK, 登录可能失败")
+
+def login(session):
+    response = session.get("https://www.luogu.com.cn/auth/login")
+    upd_c3vk(session, response)
 
     _t = time.time() * 1000 + random.random()
     response = session.get(f"https://www.luogu.com.cn/lg4/captcha?_t={_t}")
@@ -55,15 +60,16 @@ def login(session):
                 config["password"] = password
                 with open("config.json", "w") as f:
                     json.dump(config, f, indent=4)
-
+    login_headers = headers.copy()
+    login_headers.update({
+        "Referer": "https://www.luogu.com.cn/auth/login",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/json"
+    })
     response = session.post(
         "https://www.luogu.com.cn/do-auth/password",
-        headers={
-            "Referer": "https://www.luogu.com.cn/auth/login",
-            "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/json"
-        },
-        json={
+        headers = login_headers,
+        json = {
             "username": username,
             "password": password,
             "captcha": captcha
@@ -73,17 +79,53 @@ def login(session):
         print("登录成功")
     else:
         print(f"登录失败: {json.loads(response.text)['errorMessage']}")
-
-
+    upd_c3vk(session, response)
+    
 if __name__ == "__main__":
     session = requests.Session()
     session.headers.update(headers)
     login(session)
-    # 测试：访问个人信息页面
-    response = session.get("https://www.luogu.com.cn/user/1283951")
-    if response.status_code == 200:
-        print("个人信息页面访问成功")
-        print(response.text)
-    else:
-        print(f"个人信息页面访问失败: {response.status_code}")
+    # 测试：添加云剪贴板
+    response = session.get(
+        "https://www.luogu.com.cn/paste",
+        headers = {
+            "Referer": "https://www.luogu.com.cn/auth/login",
+        }
+    )
+    print(response.status_code)
+    upd_c3vk(session, response)
+
+    csrf_match = re.search(r'<meta name="csrf-token" content="([^"]+)">', response.text)
+    if not csrf_match:
+        print("无法获取CSRF Token，请求将失败")
+        exit(1)
+    csrf_token = csrf_match.group(1)
+    print(f"获取到CSRF Token: {csrf_token}")
+
+    post_headers = headers.copy()
+    post_headers.update({
+        "Referer": "https://www.luogu.com.cn/paste",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.luogu.com.cn",
+        "Priority": "u=1, i",
+        "Sec-Ch-Ua": '"Microsoft Edge";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "X-Csrf-Token": csrf_token
+    })
+    response = session.post(
+        "https://www.luogu.com.cn/paste/new",
+        headers = post_headers,
+        json = {
+            "public": True,
+            "data": f"Hello world! ({time.time()})"
+        }
+    )
+    print(response.status_code)
+    print(response.text)
 
